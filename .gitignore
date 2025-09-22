@@ -18,7 +18,10 @@ pnpm-debug.log*
 /build
 /dist
 
+firebase-service-account.json
+
 # Misc
 .DS_Store
 *.pem
 EOF
+
