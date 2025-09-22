@@ -55,9 +55,7 @@ app.use(cookieParser());
 app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
 
 /* CORS - restrict origins in production */
-const allowedOrigins = (
-  process.env.CORS_ORIGINS || "https://leaftown.vercel.app"
-)
+const allowedOrigins = (process.env.CORS_ORIGINS || "")
   .split(",")
   .filter(Boolean);
 app.use(
@@ -66,6 +64,7 @@ app.use(
     credentials: true,
   })
 );
+console.log(allowedOrigins);
 
 /* Rate limiter - basic protection against brute force/DoS */
 const apiLimiter = rateLimit({
