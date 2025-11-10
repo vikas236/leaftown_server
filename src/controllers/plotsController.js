@@ -67,7 +67,17 @@ exports.getAllPlots = async (req, res, next) => {
   try {
     const db = req.app.locals.db;
     const allPlots = await db.query(
-      "SELECT * FROM open_plots ORDER BY date_listed DESC"
+      `SELECT 
+         p.*, 
+         COALESCE(json_agg(i.path) FILTER (WHERE i.path IS NOT NULL), '[]') AS images
+       FROM 
+         open_plots p
+       LEFT JOIN 
+         images i ON i.filename = 'plot_' || p.plot_number || '_plots'
+       GROUP BY 
+         p.plot_id
+       ORDER BY 
+         p.date_listed DESC`
     );
     res.json(allPlots.rows);
   } catch (error) {
@@ -83,9 +93,20 @@ exports.getPlotById = async (req, res, next) => {
   try {
     const { id } = req.params;
     const db = req.app.locals.db;
-    const plot = await db.query("SELECT * FROM open_plots WHERE plot_id = $1", [
-      id,
-    ]);
+    const plot = await db.query(
+      `SELECT 
+         p.*, 
+         COALESCE(json_agg(i.path) FILTER (WHERE i.path IS NOT NULL), '[]') AS images
+       FROM 
+         open_plots p
+       LEFT JOIN 
+         images i ON i.filename = 'plot_' || p.plot_number || '_plots'
+       WHERE 
+         p.plot_id = $1
+       GROUP BY 
+         p.plot_id`,
+      [id]
+    );
 
     if (plot.rows.length === 0) {
       return res.status(404).json({ error: "Plot not found" });
@@ -107,6 +128,9 @@ exports.updatePlot = async (req, res, next) => {
     const db = req.app.locals.db;
     const seller_id = req.user.sub;
     const updates = req.body;
+
+    // ✅ ADD THIS LINE:
+    delete updates.images; // Remove the 'images' property
 
     const existingPlot = await db.query(
       "SELECT seller_id FROM open_plots WHERE plot_id = $1",
@@ -148,28 +172,47 @@ exports.updatePlot = async (req, res, next) => {
  * @route DELETE /api/plots/:id
  */
 exports.deletePlot = async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    const db = req.app.locals.db;
-    const seller_id = req.user.sub;
+  const { id } = req.params;
+  const db = req.app.locals.db;
+  const seller_id = req.user.sub;
+  const client = await db.connect(); // Get a client for the transaction
 
-    const existingPlot = await db.query(
-      "SELECT seller_id FROM open_plots WHERE plot_id = $1",
+  try {
+    await client.query("BEGIN"); // Start transaction
+
+    // 1. Get the listing, verify ownership, and get plot_number
+    const existingPlot = await client.query(
+      "SELECT seller_id, plot_number FROM open_plots WHERE plot_id = $1",
       [id]
     );
 
     if (existingPlot.rows.length === 0) {
+      await client.query("ROLLBACK");
+      client.release();
       return res.status(404).json({ error: "Plot not found" });
     }
     if (existingPlot.rows[0].seller_id !== seller_id) {
+      await client.query("ROLLBACK");
+      client.release();
       return res
         .status(403)
         .json({ error: "You do not have permission to delete this listing" });
     }
 
-    await db.query("DELETE FROM open_plots WHERE plot_id = $1", [id]);
-    res.json({ message: "Plot deleted successfully" });
+    // 2. Delete associated images from the 'images' table
+    const plotNumber = existingPlot.rows[0].plot_number;
+    const imageName = `plot_${plotNumber}_plots`;
+    await client.query("DELETE FROM images WHERE filename = $1", [imageName]);
+
+    // 3. Delete the plot itself
+    await client.query("DELETE FROM open_plots WHERE plot_id = $1", [id]);
+
+    await client.query("COMMIT"); // Commit the transaction
+    res.json({ message: "Plot and associated images deleted successfully" });
   } catch (error) {
+    await client.query("ROLLBACK"); // Rollback on error
     next(error);
+  } finally {
+    client.release(); // Always release the client
   }
 };

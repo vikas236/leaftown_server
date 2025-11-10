@@ -1,31 +1,31 @@
-// src/routes/apartments.js
+// src/routes/flats.js
 const express = require("express");
 const router = express.Router();
-const apartmentsController = require("../controllers/apartmentsController");
+const flatsController = require("../controllers/flatsController"); // MODIFIED: Import flatsController
 const authMiddleware = require("../middleware/authMiddleware");
 
-// Public routes for fetching apartment listings
-router.get("/", apartmentsController.getAllApartments);
-router.get("/:id", apartmentsController.getApartmentById);
+// Public routes for fetching flat listings
+router.get("/", flatsController.getAllFlats); // MODIFIED
+router.get("/:id", flatsController.getFlatById); // MODIFIED
 
 // Protected routes that require seller authentication
 router.post(
   "/",
   authMiddleware.isAuthenticated,
   authMiddleware.isSeller,
-  apartmentsController.createApartment
+  flatsController.createFlat // MODIFIED
 );
 router.put(
   "/:id",
   authMiddleware.isAuthenticated,
   authMiddleware.isSeller,
-  apartmentsController.updateApartment
+  flatsController.updateFlat // MODIFIED
 );
 router.delete(
   "/:id",
   authMiddleware.isAuthenticated,
   authMiddleware.isSeller,
-  apartmentsController.deleteApartment
+  flatsController.deleteFlat // MODIFIED
 );
 
 module.exports = router;

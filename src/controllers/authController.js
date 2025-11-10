@@ -12,43 +12,44 @@ const signRefreshToken = (payload) =>
   });
 
 /* New: User Registration */
-exports.register = async (req, res, next) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
+try {
+  exports.register = async (req, res, next) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+      }
 
-    const {
-      phone,
-      user_type,
-      user_name,
-      email,
-      address,
-      rera_id,
-      brokerage_firm_name,
-      agent_license_number,
-    } = req.body;
-    const db = req.app.locals.db;
+      const {
+        phone,
+        user_type,
+        user_name,
+        email,
+        address,
+        rera_id,
+        brokerage_firm_name,
+        agent_license_number,
+      } = req.body;
+      const db = req.app.locals.db;
 
-    const existingUser = await db.query(
-      "SELECT * FROM Users WHERE phone = $1",
-      [phone]
-    );
-    if (existingUser.rows.length > 0) {
-      return res
-        .status(409)
-        .json({ error: "User with this phone number already exists" });
-    }
+      const existingUser = await db.query(
+        "SELECT * FROM Users WHERE phone = $1",
+        [phone]
+      );
+      if (existingUser.rows.length > 0) {
+        return res
+          .status(409)
+          .json({ error: "User with this phone number already exists" });
+      }
 
-    const newUser = await db.query(
-      "INSERT INTO Users (phone, user_type, user_name) VALUES ($1, $2, $3) RETURNING user_id, user_type",
-      [phone, user_type, user_name]
-    );
+      const newUser = await db.query(
+        "INSERT INTO Users (phone, user_type, user_name) VALUES ($1, $2, $3) RETURNING user_id, user_type",
+        [phone, user_type, user_name]
+      );
 
-    if (user_type === "seller") {
-      await db.query(
-        `INSERT INTO Sellers (
+      if (user_type === "seller") {
+        await db.query(
+          `INSERT INTO Sellers (
             user_id,
             seller_type,
             seller_name,
@@ -59,178 +60,207 @@ exports.register = async (req, res, next) => {
             brokerage_firm_name,
             agent_license_number
           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-        [
-          newUser.rows[0].user_id,
-          "individual",
-          user_name,
-          user_name,
-          email,
-          address,
-          rera_id,
-          brokerage_firm_name,
-          agent_license_number,
-        ]
-      );
-    }
-
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    await db.query("INSERT INTO Otp_Tokens (user_id, otp) VALUES ($1, $2)", [
-      newUser.rows[0].user_id,
-      otp,
-    ]);
-
-    res.status(201).json({ message: "User registered and OTP sent." });
-  } catch (err) {
-    console.error("Error in register function:", err);
-    next(err);
-  }
-};
-
-/* Send OTP */
-exports.sendOtp = async (req, res, next) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
-
-    const { phone } = req.body;
-    const db = req.app.locals.db;
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-
-    let user = await db.query(
-      "SELECT user_id, user_type FROM Users WHERE phone = $1",
-      [phone]
-    );
-
-    if (user.rows.length === 0) {
-      return res
-        .status(404)
-        .json({ error: "User not found. Please register." });
-    }
-
-    await db.query("INSERT INTO Otp_Tokens (user_id, otp) VALUES ($1, $2)", [
-      user.rows[0].user_id,
-      otp,
-    ]);
-
-    // Log the OTP for debugging purposes
-    console.log(`OTP for ${phone} is: ${otp}`);
-
-    res.json({
-      message: "OTP sent successfully",
-      user_type: user.rows[0].user_type,
-    });
-  } catch (err) {
-    console.error("Error in sendOtp function:", err);
-    next(err);
-  }
-};
-
-/* Verify OTP & issue tokens */
-exports.verifyOtp = async (req, res, next) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
-
-    const { phone, otp } = req.body;
-    const db = req.app.locals.db;
-
-    // Modified to select user_name
-    const user = await db.query("SELECT * FROM Users WHERE phone = $1", [
-      phone,
-    ]);
-    if (user.rows.length === 0) {
-      return res.status(401).json({ error: "Invalid OTP" });
-    }
-
-    const otpRecord = await db.query(
-      "SELECT * FROM Otp_Tokens WHERE user_id = $1 AND otp = $2",
-      [user.rows[0].user_id, otp]
-    );
-    if (otpRecord.rows.length === 0) {
-      return res.status(401).json({ error: "Invalid OTP" });
-    }
-
-    const accessToken = signAccessToken({
-      sub: user.rows[0].user_id,
-      role: user.rows[0].user_type,
-      user_name: user.rows[0].user_name,
-    });
-    const refreshToken = signRefreshToken({
-      sub: user.rows[0].user_id,
-      role: user.rows[0].user_type,
-    });
-
-    await db.query("UPDATE Users SET refresh_token = $1 WHERE user_id = $2", [
-      refreshToken,
-      user.rows[0].user_id,
-    ]);
-
-    res.cookie("refreshToken", refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
-    res.json({ accessToken });
-  } catch (err) {
-    console.error("Error in verifyOtp function:", err);
-    next(err);
-  }
-};
-
-/* Refresh token */
-exports.refreshToken = async (req, res, next) => {
-  try {
-    const token = req.cookies?.refreshToken || req.body?.refreshToken;
-    if (!token) {
-      return res.status(401).json({ error: "No refresh token" });
-    }
-    const db = req.app.locals.db;
-
-    jwt.verify(token, process.env.JWT_SECRET, async (err, payload) => {
-      if (err) {
-        return res.status(401).json({ error: "Invalid refresh token" });
+          [
+            newUser.rows[0].user_id,
+            "individual",
+            user_name,
+            user_name,
+            email,
+            address,
+            rera_id,
+            brokerage_firm_name,
+            agent_license_number,
+          ]
+        );
       }
 
-      const userId = payload.sub;
-      // Modified to select user_name
-      const user = await db.query("SELECT * FROM Users WHERE user_id = $1", [
-        userId,
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      await db.query("INSERT INTO Otp_Tokens (user_id, otp) VALUES ($1, $2)", [
+        newUser.rows[0].user_id,
+        otp,
       ]);
 
-      if (user.rows.length === 0 || user.rows[0].refresh_token !== token) {
-        return res.status(401).json({ error: "Invalid refresh token" });
+      res.status(201).json({ message: "User registered and OTP sent." });
+    } catch (err) {
+      console.error("Error in register function:", err);
+      next(err);
+    }
+  };
+} catch (e) {
+  console.error("Error loading register function:", e.message);
+  throw e;
+}
+
+/* Send OTP */
+try {
+  exports.sendOtp = async (req, res, next) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
       }
 
-      const newAccess = signAccessToken({
+      const { phone } = req.body;
+      const db = req.app.locals.db;
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+      let user = await db.query(
+        "SELECT user_id, user_type FROM Users WHERE phone = $1",
+        [phone]
+      );
+
+      if (user.rows.length === 0) {
+        return res
+          .status(404)
+          .json({ error: "User not found. Please register." });
+      }
+
+      await db.query("INSERT INTO Otp_Tokens (user_id, otp) VALUES ($1, $2)", [
+        user.rows[0].user_id,
+        otp,
+      ]);
+
+      // Log the OTP for debugging purposes
+      console.log(`OTP for ${phone} is: ${otp}`);
+
+      res.json({
+        message: "OTP sent successfully",
+        user_type: user.rows[0].user_type,
+      });
+    } catch (err) {
+      console.error("Error in sendOtp function:", err);
+      next(err);
+    }
+  };
+} catch (e) {
+  console.error("Error loading sendOtp function:", e.message);
+  throw e;
+}
+
+/* Verify OTP & issue tokens */
+try {
+  exports.verifyOtp = async (req, res, next) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+      }
+
+      const { phone, otp } = req.body;
+      const db = req.app.locals.db;
+
+      const user = await db.query("SELECT * FROM Users WHERE phone = $1", [
+        phone,
+      ]);
+      if (user.rows.length === 0) {
+        return res.status(401).json({ error: "Invalid OTP" });
+      }
+
+      const otpRecord = await db.query(
+        "SELECT * FROM Otp_Tokens WHERE user_id = $1 AND otp = $2",
+        [user.rows[0].user_id, otp]
+      );
+      if (otpRecord.rows.length === 0) {
+        return res.status(401).json({ error: "Invalid OTP" });
+      }
+
+      const accessToken = signAccessToken({
         sub: user.rows[0].user_id,
         role: user.rows[0].user_type,
         user_name: user.rows[0].user_name,
       });
-      const newRefresh = signRefreshToken({
+      const refreshToken = signRefreshToken({
         sub: user.rows[0].user_id,
         role: user.rows[0].user_type,
       });
 
       await db.query("UPDATE Users SET refresh_token = $1 WHERE user_id = $2", [
-        newRefresh,
+        refreshToken,
         user.rows[0].user_id,
       ]);
 
-      res.cookie("refreshToken", newRefresh, {
+      res.cookie("refreshToken", refreshToken, {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
         sameSite: "lax",
         maxAge: 7 * 24 * 60 * 60 * 1000,
       });
-      res.json({ accessToken: newAccess });
-    });
-  } catch (err) {
-    console.error("Error in refreshToken function:", err);
-    next(err);
-  }
-};
+      res.json({ accessToken });
+    } catch (err) {
+      console.error("Error in verifyOtp function:", err);
+      next(err);
+    }
+  };
+} catch (e) {
+  console.error("Error loading verifyOtp function:", e.message);
+  throw e;
+}
+
+/* Refresh token */
+try {
+  exports.refreshToken = async (req, res, next) => {
+    try {
+      const token = req.cookies?.refreshToken || req.body?.refreshToken;
+      if (!token) {
+        return res.status(401).json({ error: "No refresh token" });
+      }
+      const db = req.app.locals.db;
+
+      jwt.verify(token, process.env.JWT_SECRET, async (err, payload) => {
+        if (err) {
+          return res.status(401).json({ error: "Invalid refresh token" });
+        }
+
+        const userId = payload.sub;
+        const user = await db.query("SELECT * FROM Users WHERE user_id = $1", [
+          userId,
+        ]);
+
+        if (user.rows.length === 0 || user.rows[0].refresh_token !== token) {
+          return res.status(401).json({ error: "Invalid refresh token" });
+        }
+
+        const newAccess = signAccessToken({
+          sub: user.rows[0].user_id,
+          role: user.rows[0].user_type,
+          user_name: user.rows[0].user_name,
+        });
+        const newRefresh = signRefreshToken({
+          sub: user.rows[0].user_id,
+          role: user.rows[0].user_type,
+        });
+
+        await db.query(
+          "UPDATE Users SET refresh_token = $1 WHERE user_id = $2",
+          [newRefresh, user.rows[0].user_id]
+        );
+
+        res.cookie("refreshToken", newRefresh, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === "production",
+          sameSite: "lax",
+          maxAge: 7 * 24 * 60 * 60 * 1000,
+        });
+        res.json({ accessToken: newAccess });
+      });
+    } catch (err) {
+      console.error("Error in refreshToken function:", err);
+      next(err);
+    }
+  };
+} catch (e) {
+  console.error("Error loading refreshToken function:", e.message);
+  throw e;
+}
+
+try {
+  /* Logout User */
+  exports.logout = (req, res) => {
+    // The server tells the browser to clear the httpOnly cookie
+    res.clearCookie("refreshToken");
+    res.status(204).send(); // Standard "No Content" success response
+  };
+} catch (e) {
+  console.error("logout failed:", e.message);
+  throw e;
+}
