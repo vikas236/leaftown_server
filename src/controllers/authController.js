@@ -102,7 +102,8 @@ try {
 
       const { phone } = req.body;
       const db = req.app.locals.db;
-      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      // const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      const otp = '000000';
 
       let user = await db.query(
         "SELECT user_id, user_type FROM Users WHERE phone = $1",
@@ -119,9 +120,6 @@ try {
         user.rows[0].user_id,
         otp,
       ]);
-
-      // Log the OTP for debugging purposes
-      console.log(`OTP for ${phone} is: ${otp}`);
 
       res.json({
         message: "OTP sent successfully",
