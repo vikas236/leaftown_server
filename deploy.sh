@@ -1,43 +1,44 @@
 #!/bin/bash
 
 # === CONFIGURATION ===
-REPO_URL="git@github.com:vikas236/leaftown_server.git"   # GitHub repo SSH URL
-REPO_BRANCH="main"                                       # Change if your default branch differs
-VPS_ALIAS="kvm1"                                         # SSH alias (from ~/.ssh/config)
-VPS_PATH="/home/vi/leaftown_server"                      # Path on VPS to host the app
-GIT_SSH_CMD='GIT_SSH_COMMAND="ssh -i ~/.ssh/id_ed25519_github -o IdentitiesOnly=yes"'
+VPS_ALIAS="kvm1"                          # SSH alias (from ~/.ssh/config)
+VPS_PATH="/home/vi/leaftown_server"       # Remote path on VPS
 
 # === STEP 1: Ask for commit message ===
 echo "Enter commit message:"
 read COMMIT_MSG
 
-# === STEP 2: Initialize Git (if not already) ===
+# === STEP 2: Initialize Git locally (optional if not already done) ===
 if [ ! -d ".git" ]; then
   echo "🔧 Initializing local Git repo..."
   git init
-  git remote add origin $REPO_URL
-  git checkout -b $REPO_BRANCH
+  git checkout -b main
 fi
 
-# === STEP 3: Commit and push to GitHub ===
-echo "📦 Committing and pushing changes to GitHub..."
+# === STEP 3: Commit local changes ===
+echo "📦 Committing local changes..."
 git add .
 git commit -m "$COMMIT_MSG" || echo "ℹ️  Nothing new to commit."
-git push -u origin $REPO_BRANCH
 
-# === STEP 4: Deploy via Git on VPS ===
-echo "🚀 Deploying to VPS ($VPS_ALIAS)..."
+# === STEP 4: Deploy to VPS via rsync ===
+echo "🚀 Deploying code to VPS ($VPS_ALIAS)..."
+
+# Ensure destination directory exists
+ssh $VPS_ALIAS "mkdir -p $VPS_PATH"
+
+# Copy everything except node_modules
+rsync -avz --delete \
+  --exclude 'node_modules' \
+  ./ $VPS_ALIAS:$VPS_PATH/
+
+# === STEP 5: Post-deploy commands ===
 ssh $VPS_ALIAS << EOF
-  set -e  # exit if any command fails
+  cd $VPS_PATH
+  echo "✅ Files copied successfully to $VPS_PATH"
 
-  if [ ! -d "$VPS_PATH/.git" ]; then
-    echo "📁 Project not found on VPS — cloning fresh..."
-    $GIT_SSH_CMD git clone -b $REPO_BRANCH $REPO_URL $VPS_PATH
-  else
-    echo "🔄 Pulling latest code from GitHub..."
-    cd $VPS_PATH
-    $GIT_SSH_CMD git pull origin $REPO_BRANCH
-  fi
-
-  echo "✅ Code synced successfully on VPS!"
+  # Optional: install deps or restart process
+  # npm install --production
+  # pm2 restart all || pm2 start server.js
 EOF
+
+echo "🎉 Deployment complete!"
