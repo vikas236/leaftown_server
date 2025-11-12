@@ -5,6 +5,7 @@ REPO_URL="git@github.com:vikas236/leaftown_server.git"   # GitHub repo SSH URL
 REPO_BRANCH="main"                                       # Change if your default branch differs
 VPS_ALIAS="kvm1"                                         # SSH alias (from ~/.ssh/config)
 VPS_PATH="/home/vi/leaftown_server"                      # Path on VPS to host the app
+GIT_SSH_CMD='GIT_SSH_COMMAND="ssh -i ~/.ssh/id_ed25519_github -o IdentitiesOnly=yes"'
 
 # === STEP 1: Ask for commit message ===
 echo "Enter commit message:"
@@ -21,7 +22,7 @@ fi
 # === STEP 3: Commit and push to GitHub ===
 echo "📦 Committing and pushing changes to GitHub..."
 git add .
-git commit -m "$COMMIT_MSG"
+git commit -m "$COMMIT_MSG" || echo "ℹ️  Nothing new to commit."
 git push -u origin $REPO_BRANCH
 
 # === STEP 4: Deploy via Git on VPS ===
@@ -31,11 +32,11 @@ ssh $VPS_ALIAS << EOF
 
   if [ ! -d "$VPS_PATH/.git" ]; then
     echo "📁 Project not found on VPS — cloning fresh..."
-    git clone -b $REPO_BRANCH $REPO_URL $VPS_PATH
+    $GIT_SSH_CMD git clone -b $REPO_BRANCH $REPO_URL $VPS_PATH
   else
     echo "🔄 Pulling latest code from GitHub..."
     cd $VPS_PATH
-    git pull origin $REPO_BRANCH
+    $GIT_SSH_CMD git pull origin $REPO_BRANCH
   fi
 
   echo "✅ Code synced successfully on VPS!"
