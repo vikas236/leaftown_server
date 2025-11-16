@@ -1,4 +1,3 @@
-// server.js
 require("dotenv").config();
 const express = require("express");
 const helmet = require("helmet");
@@ -48,6 +47,13 @@ pool
 app.locals.db = pool;
 // --- END DATABASE INITIALIZATION ---
 
+// --- PROXY FIX ---
+// FIX: Trust the first proxy hop (e.g., AWS ELB, Nginx)
+// This tells Express to trust the X-Forwarded-For header.
+// MUST be set before any rate limiters or IP-dependent middleware.
+app.set("trust proxy", 1);
+// --- END PROXY FIX ---
+
 /* --- BASIC MIDDLEWARES --- */
 app.use(
   helmet({
@@ -93,6 +99,7 @@ const apiLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: "Too many requests, please try again later." },
+  // 'trust proxy' setting in Express will be used automatically
 });
 app.use("/api/", apiLimiter);
 
