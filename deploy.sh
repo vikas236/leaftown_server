@@ -1,10 +1,9 @@
 #!/bin/bash
 
 # === CONFIGURATION ===
-VPS_USER="vi"
-VPS_HOST="srv766600"
-VPS_PATH="/home/vi/leaftown/server"
-PM2_APP_NAME="leaftown-server"  # <--- UPDATED NAME
+VPS_ALIAS="kvm1"                       # <--- Uses your SSH config alias
+VPS_PATH="/home/vi/leaftown/server"    # Path on the remote server
+PM2_APP_NAME="leaftown-server"         # Name in PM2
 
 # === STEP 1: Ask for commit message ===
 echo "Enter commit message:"
@@ -22,43 +21,43 @@ git commit -m "$COMMIT_MSG"
 # git push origin main # Uncomment if you use GitHub/GitLab
 
 # === STEP 3: Deploy to VPS via rsync ===
-echo "🚀 Deploying code to $VPS_HOST:$VPS_PATH ..."
+echo "🚀 Deploying code to $VPS_ALIAS:$VPS_PATH ..."
 
-# Ensure destination directory exists
-ssh $VPS_USER@$VPS_HOST "mkdir -p $VPS_PATH"
+# Ensure destination directory exists using the alias
+ssh $VPS_ALIAS "mkdir -p $VPS_PATH"
 
-# === RSYNC SAFETY EXPLANATION ===
-# --delete: Removes old code files on server that you deleted locally.
-# --exclude 'uploads': SAFETY LOCK. It tells rsync to pretend the 'uploads' folder 
-#                      doesn't exist. It won't delete server images, and it won't 
-#                      upload local images.
-# --exclude '.env': Keeps production secrets safe.
+# === RSYNC ===
+# Uses the alias 'kvm1' directly.
+# --exclude 'uploads': Protects server-side images.
+# --exclude '.env': Protects server-side secrets.
 
 rsync -avz --delete \
   --exclude 'node_modules' \
   --exclude '.git' \
   --exclude '.env' \
   --exclude 'uploads' \
-  ./ $VPS_USER@$VPS_HOST:$VPS_PATH/
+  ./ $VPS_ALIAS:$VPS_PATH/
 
 # === STEP 4: Remote Commands ===
-echo "🔄 Running remote commands..."
+echo "🔄 Running remote commands on $VPS_ALIAS..."
 
-ssh $VPS_USER@$VPS_HOST << EOF
+ssh $VPS_ALIAS << EOF
   cd $VPS_PATH
   
   # 1. Install dependencies
   echo "📦 Installing dependencies..."
   npm install --production
 
-  # 2. Restart/Start the server with the NEW NAME
+  # 2. Restart/Start the server
   echo "🔥 Managing PM2 process..."
   
-  # Check if process exists, restart it; otherwise start it new
+  # Check if process exists
   pm2 describe $PM2_APP_NAME > /dev/null
   if [ \$? -eq 0 ]; then
+      # If it exists, restart it
       pm2 restart $PM2_APP_NAME
   else
+      # If it doesn't exist, start it on the new port (3003 will be read from .env)
       pm2 start server.js --name "$PM2_APP_NAME"
   fi
   
