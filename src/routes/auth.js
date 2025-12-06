@@ -3,6 +3,9 @@ const router = express.Router();
 const { body } = require("express-validator");
 const authController = require("../controllers/authController");
 
+// ✅ Import middleware
+const { verifyToken } = require("../middleware/authMiddleware");
+
 /* Send OTP (for existing users) */
 router.post(
   "/send-otp",
@@ -30,7 +33,7 @@ router.post(
   authController.verifyOtp
 );
 
-/* User Registration with Roles */
+/* User Registration */
 router.post(
   "/register",
   [
@@ -44,43 +47,20 @@ router.post(
       .notEmpty()
       .isString()
       .withMessage("User name is required"),
-
     // Conditional validation for sellers
-    body("email")
-      .if(body("user_type").equals("seller"))
-      .notEmpty()
-      .withMessage("Email is required for sellers")
-      .isEmail()
-      .withMessage("Please enter a valid email address"),
-
-    body("address")
-      .if(body("user_type").equals("seller"))
-      .notEmpty()
-      .withMessage("Address is required for sellers"),
-
-    body("rera_id")
-      .if(body("user_type").equals("seller"))
-      .optional({ checkFalsy: true })
-      .isString()
-      .withMessage("RERA ID must be a string"),
-
-    body("brokerage_firm_name")
-      .if(body("user_type").equals("seller"))
-      .optional({ checkFalsy: true })
-      .isString()
-      .withMessage("Brokerage firm name must be a string"),
-
-    body("agent_license_number")
-      .if(body("user_type").equals("seller"))
-      .optional({ checkFalsy: true })
-      .isString()
-      .withMessage("Agent license number must be a string"),
+    body("email").if(body("user_type").equals("seller")).notEmpty().isEmail(),
+    body("address").if(body("user_type").equals("seller")).notEmpty(),
   ],
   authController.register
 );
 
-/* Refresh token */
+/* Refresh token & Logout */
 router.post("/refresh", authController.refreshToken);
 router.post("/logout", authController.logout);
+
+/* ✅ NEW ROUTES (Protected) */
+router.get("/profile", verifyToken, authController.getProfile);
+router.put("/profile", verifyToken, authController.updateProfile);
+router.post("/verify", verifyToken, authController.requestVerification);
 
 module.exports = router;

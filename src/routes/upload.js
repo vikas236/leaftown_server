@@ -1,12 +1,13 @@
 const express = require("express");
 const rateLimit = require("express-rate-limit");
-// 1. Import the new deleteImage controller and isAuthenticated middleware
 const {
   safeUpload,
   handleUpload,
   deleteImage,
 } = require("../controllers/uploadController");
-const { isAuthenticated } = require("../middleware/authMiddleware");
+
+// ✅ FIX: Import 'verifyToken' instead of 'isAuthenticated'
+const { verifyToken } = require("../middleware/authMiddleware");
 
 const router = express.Router();
 
@@ -17,10 +18,10 @@ const uploadLimiter = rateLimit({
   message: { success: false, message: "Too many uploads, try again later." },
 });
 
-// 2. Protect the POST route with isAuthenticated
-router.post("/", uploadLimiter, isAuthenticated, safeUpload, handleUpload);
+// ✅ FIX: Use 'verifyToken' here
+router.post("/", uploadLimiter, verifyToken, safeUpload, handleUpload);
 
-// 3. Add the new DELETE route
-router.delete("/:filename", isAuthenticated, deleteImage);
+// ✅ FIX: Use 'verifyToken' here
+router.delete("/:filename", verifyToken, deleteImage);
 
 module.exports = router;

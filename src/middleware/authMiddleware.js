@@ -1,7 +1,11 @@
 const jwt = require("jsonwebtoken");
 
-const isAuthenticated = (req, res, next) => {
+/**
+ * Middleware to verify JWT Access Token
+ */
+const verifyToken = (req, res, next) => {
   const authHeader = req.headers.authorization;
+
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
     return res
       .status(401)
@@ -10,36 +14,26 @@ const isAuthenticated = (req, res, next) => {
 
   const token = authHeader.split(" ")[1];
 
-  // FIX: Use try/catch for synchronous jwt.verify to handle errors
   try {
     const payload = jwt.verify(token, process.env.JWT_SECRET);
-
-    req.user = {
-      sub: payload.sub,
-      role: payload.role,
-    };
+    req.user = payload; // payload contains { sub, role, user_name, etc }
     next();
   } catch (err) {
     console.error("JWT verification failed:", err.message);
 
-    // FIX: Specifically handle TokenExpiredError
     if (err.name === "TokenExpiredError") {
       return res.status(401).json({
         error: "Token expired",
         expiredAt: err.expiredAt,
       });
     }
-
-    // Handle other verification errors (e.g., invalid signature)
-    if (err.name === "JsonWebTokenError") {
-      return res.status(401).json({ error: "Invalid token" });
-    }
-
-    // Default catch-all for other errors
-    return res.status(500).json({ error: "Authentication failed" });
+    return res.status(401).json({ error: "Invalid token" });
   }
 };
 
+/**
+ * Middleware to check if the authenticated user is a Seller
+ */
 const isSeller = (req, res, next) => {
   if (req.user && req.user.role === "seller") {
     next();
@@ -48,4 +42,4 @@ const isSeller = (req, res, next) => {
   }
 };
 
-module.exports = { isAuthenticated, isSeller };
+module.exports = { verifyToken, isSeller };

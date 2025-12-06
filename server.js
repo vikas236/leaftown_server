@@ -14,11 +14,17 @@ const { json, urlencoded } = require("express");
 const logger = require("./src/utils/logger");
 const { Pool } = require("pg");
 
+// --- IMPORT ROUTES ---
 const authRoutes = require("./src/routes/auth");
 const healthRoutes = require("./src/routes/health");
 const flatsRoutes = require("./src/routes/flats");
 const plotsRoutes = require("./src/routes/plots");
 const uploadRoutes = require("./src/routes/upload");
+
+// ✅ NEW IMPORTS
+const projectsRoutes = require("./src/routes/projects");
+const supportRoutes = require("./src/routes/support");
+
 const { errorHandler } = require("./src/middleware/errorHandler");
 
 const app = express();
@@ -48,16 +54,11 @@ app.locals.db = pool;
 // --- END DATABASE INITIALIZATION ---
 
 // --- PROXY FIX ---
-// FIX: Trust the first proxy hop (e.g., AWS ELB, Nginx)
-// This tells Express to trust the X-Forwarded-For header.
-// MUST be set before any rate limiters or IP-dependent middleware.
 app.set("trust proxy", 1);
-// --- END PROXY FIX ---
 
 /* --- BASIC MIDDLEWARES --- */
 app.use(
   helmet({
-    // Conditionally disable HSTS in development
     hsts: process.env.NODE_ENV === "production",
     crossOriginResourcePolicy: { policy: "cross-origin" },
   })
@@ -99,28 +100,16 @@ const apiLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: "Too many requests, please try again later." },
-  // 'trust proxy' setting in Express will be used automatically
 });
 app.use("/api/", apiLimiter);
 
 /* --- UPLOAD RATE LIMITER --- */
 const uploadLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: 10, // max 10 uploads per minute per IP
+  windowMs: 60 * 1000,
+  max: 10,
   message: { success: false, message: "Too many uploads, try again later." },
 });
 app.use("/api/upload", uploadLimiter);
-
-/* --- CSRF PROTECTION (cookie-based sessions) --- */
-const csrfProtection = csurf({
-  cookie: {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-  },
-});
-// Uncomment if using cookie-based auth
-// app.use(csrfProtection);
 
 /* --- CONTENT SECURITY POLICY --- */
 app.use(
@@ -143,11 +132,14 @@ app.use("/api/flats", flatsRoutes);
 app.use("/api/plots", plotsRoutes);
 app.use("/api/upload", uploadRoutes);
 
+// ✅ NEW ROUTE REGISTRATIONS
+app.use("/api/projects", projectsRoutes); // For Ventures, Townships, Apartments
+app.use("/api/support", supportRoutes); // For Customer Tickets
+
 /* --- SAFE FILE SERVING --- */
 const UPLOAD_DIR = path.resolve(__dirname, "uploads");
 app.get("/api/uploads/:filename", async (req, res) => {
   try {
-    // Prevent path traversal
     const filename = path.basename(req.params.filename);
     const filePath = path.join(UPLOAD_DIR, filename);
 
@@ -158,7 +150,9 @@ app.get("/api/uploads/:filename", async (req, res) => {
     }
 
     // Serve file safely
-    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    // Note: If you want browsers to display images inline instead of downloading,
+    // remove the Content-Disposition header for image types.
+    // res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
     res.sendFile(filePath);
   } catch (err) {
     logger.error("Error serving file:", err);
@@ -174,7 +168,7 @@ app.use((req, res) => {
 /* --- CENTRALIZED ERROR HANDLER --- */
 app.use(errorHandler);
 
-/* --- START SERVER WITH GRACEFUL SHUTDOWN --- */
+/* --- START SERVER --- */
 const server = app.listen(PORT, () => {
   logger.info(`Server listening on port ${PORT}`);
 });

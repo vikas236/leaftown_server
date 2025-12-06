@@ -1,26 +1,18 @@
 // src/controllers/plotsController.js
 const { validationResult } = require("express-validator");
+const { generateCustomID } = require("../utils/idGenerator");
 
 /**
- * Helper function to check if a user is a registered seller.
- * This function adds a layer of data-level validation.
+ * Helper to get seller_id from user_id
  */
-const isRegisteredSeller = async (db, user_id) => {
-  try {
-    const sellerResult = await db.query(
-      "SELECT seller_id FROM sellers WHERE user_id = $1",
-      [user_id]
-    );
-    return sellerResult.rows.length > 0;
-  } catch (err) {
-    throw new Error("Database query failed during seller check.");
-  }
+const getSellerId = async (db, user_id) => {
+  const result = await db.query(
+    "SELECT seller_id FROM sellers WHERE user_id = $1",
+    [user_id]
+  );
+  return result.rows.length > 0 ? result.rows[0].seller_id : null;
 };
 
-/**
- * Creates a new open plot listing.
- * @route POST /api/plots
- */
 exports.createPlot = async (req, res, next) => {
   try {
     const errors = validationResult(req);
@@ -28,26 +20,50 @@ exports.createPlot = async (req, res, next) => {
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const seller_id = req.user.sub;
+    const user_id = req.user.sub; // This is user_id from JWT
     const db = req.app.locals.db;
 
-    // New check: Verify that the user ID exists in the sellers table.
-    const isSeller = await isRegisteredSeller(db, seller_id);
-    if (!isSeller) {
+    // Verify Seller & Get ID
+    const seller_id = await getSellerId(db, user_id);
+    if (!seller_id) {
       return res
         .status(403)
         .json({ error: "You are not a registered seller." });
     }
 
-    const { plot_number, location, facing, size_sqft, price } = req.body;
+    const {
+      project_id, // Link to Venture/Township
+      plot_number,
+      location,
+      facing,
+      area_sq_yards, // Input in Sq Yards
+      price,
+      bank_loan_available,
+    } = req.body;
+
+    // Logic: Convert Yards to Feet for DB storage if needed, or store both
+    // 1 Sq Yard = 9 Sq Ft
+    const size_sqft = area_sq_yards ? area_sq_yards * 9 : 0;
+    const plot_display_id = generateCustomID("PLT");
 
     const newPlot = await db.query(
       `INSERT INTO open_plots (
-          seller_id, plot_number, location, facing, size_sqft, price, 
-          status, date_listed
-      ) VALUES ($1, $2, $3, $4, $5, $6, 'available', NOW())
+          project_id, seller_id, plot_display_id, plot_number, location, 
+          facing, area_sq_yards, size_sqft, price, status, bank_loan_available, date_listed
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'Available', $10, NOW())
       RETURNING *`,
-      [seller_id, plot_number, location, facing, size_sqft, price]
+      [
+        project_id,
+        seller_id,
+        plot_display_id,
+        plot_number,
+        location,
+        facing,
+        area_sq_yards,
+        size_sqft,
+        price,
+        bank_loan_available,
+      ]
     );
 
     res.status(201).json({
@@ -59,25 +75,20 @@ exports.createPlot = async (req, res, next) => {
   }
 };
 
-/**
- * Retrieves all open plot listings.
- * @route GET /api/plots
- */
 exports.getAllPlots = async (req, res, next) => {
   try {
     const db = req.app.locals.db;
+    // Updated Query: Joins with Projects to show Venture Name
     const allPlots = await db.query(
       `SELECT 
          p.*, 
+         prj.project_name,
          COALESCE(json_agg(i.path) FILTER (WHERE i.path IS NOT NULL), '[]') AS images
-       FROM 
-         open_plots p
-       LEFT JOIN 
-         images i ON i.filename = 'plot_' || p.plot_number || '_plots'
-       GROUP BY 
-         p.plot_id
-       ORDER BY 
-         p.date_listed DESC`
+       FROM open_plots p
+       LEFT JOIN projects prj ON p.project_id = prj.project_id
+       LEFT JOIN images i ON i.filename = 'plot_' || p.plot_number || '_plots'
+       GROUP BY p.plot_id, prj.project_name
+       ORDER BY p.date_listed DESC`
     );
     res.json(allPlots.rows);
   } catch (error) {
@@ -85,10 +96,6 @@ exports.getAllPlots = async (req, res, next) => {
   }
 };
 
-/**
- * Retrieves a single open plot listing by its ID.
- * @route GET /api/plots/:id
- */
 exports.getPlotById = async (req, res, next) => {
   try {
     const { id } = req.params;
@@ -96,15 +103,13 @@ exports.getPlotById = async (req, res, next) => {
     const plot = await db.query(
       `SELECT 
          p.*, 
+         prj.project_name,
          COALESCE(json_agg(i.path) FILTER (WHERE i.path IS NOT NULL), '[]') AS images
-       FROM 
-         open_plots p
-       LEFT JOIN 
-         images i ON i.filename = 'plot_' || p.plot_number || '_plots'
-       WHERE 
-         p.plot_id = $1
-       GROUP BY 
-         p.plot_id`,
+       FROM open_plots p
+       LEFT JOIN projects prj ON p.project_id = prj.project_id
+       LEFT JOIN images i ON i.filename = 'plot_' || p.plot_number || '_plots'
+       WHERE p.plot_id = $1
+       GROUP BY p.plot_id, prj.project_name`,
       [id]
     );
 
@@ -118,34 +123,33 @@ exports.getPlotById = async (req, res, next) => {
   }
 };
 
-/**
- * Updates an existing open plot listing.
- * @route PUT /api/plots/:id
- */
 exports.updatePlot = async (req, res, next) => {
   try {
     const { id } = req.params;
     const db = req.app.locals.db;
-    const seller_id = req.user.sub;
+    const user_id = req.user.sub;
     const updates = req.body;
 
-    // ✅ ADD THIS LINE:
-    delete updates.images; // Remove the 'images' property
+    delete updates.images;
 
+    // Verify ownership
     const existingPlot = await db.query(
-      "SELECT seller_id FROM open_plots WHERE plot_id = $1",
+      `SELECT p.seller_id, s.user_id 
+         FROM open_plots p 
+         JOIN sellers s ON p.seller_id = s.seller_id 
+         WHERE p.plot_id = $1`,
       [id]
     );
 
-    if (existingPlot.rows.length === 0) {
+    if (existingPlot.rows.length === 0)
       return res.status(404).json({ error: "Plot not found" });
-    }
-    if (existingPlot.rows[0].seller_id !== seller_id) {
-      return res
-        .status(403)
-        .json({ error: "You do not have permission to update this listing" });
+
+    // Check if the logged-in user matches the seller's user_id
+    if (existingPlot.rows[0].user_id !== user_id) {
+      return res.status(403).json({ error: "Permission denied" });
     }
 
+    // Dynamic SQL generation
     const setClause = Object.keys(updates)
       .map((key, index) => `${key} = $${index + 1}`)
       .join(", ");
@@ -158,31 +162,28 @@ exports.updatePlot = async (req, res, next) => {
       [...values, id]
     );
 
-    res.json({
-      message: "Plot updated successfully",
-      plot: updatedPlot.rows[0],
-    });
+    res.json({ message: "Plot updated", plot: updatedPlot.rows[0] });
   } catch (error) {
     next(error);
   }
 };
 
-/**
- * Deletes an open plot listing.
- * @route DELETE /api/plots/:id
- */
 exports.deletePlot = async (req, res, next) => {
+  // ... (Keep your existing delete logic, but ensure you check seller ownership via user_id like in updatePlot)
   const { id } = req.params;
   const db = req.app.locals.db;
-  const seller_id = req.user.sub;
-  const client = await db.connect(); // Get a client for the transaction
+  const user_id = req.user.sub;
+  const client = await db.connect();
 
   try {
-    await client.query("BEGIN"); // Start transaction
+    await client.query("BEGIN");
 
-    // 1. Get the listing, verify ownership, and get plot_number
+    // Verify ownership
     const existingPlot = await client.query(
-      "SELECT seller_id, plot_number FROM open_plots WHERE plot_id = $1",
+      `SELECT p.seller_id, p.plot_number, s.user_id 
+             FROM open_plots p 
+             JOIN sellers s ON p.seller_id = s.seller_id 
+             WHERE p.plot_id = $1`,
       [id]
     );
 
@@ -191,28 +192,26 @@ exports.deletePlot = async (req, res, next) => {
       client.release();
       return res.status(404).json({ error: "Plot not found" });
     }
-    if (existingPlot.rows[0].seller_id !== seller_id) {
+
+    if (existingPlot.rows[0].user_id !== user_id) {
       await client.query("ROLLBACK");
       client.release();
-      return res
-        .status(403)
-        .json({ error: "You do not have permission to delete this listing" });
+      return res.status(403).json({ error: "Permission denied" });
     }
 
-    // 2. Delete associated images from the 'images' table
+    // Delete Logic
     const plotNumber = existingPlot.rows[0].plot_number;
-    const imageName = `plot_${plotNumber}_plots`;
-    await client.query("DELETE FROM images WHERE filename = $1", [imageName]);
-
-    // 3. Delete the plot itself
+    await client.query("DELETE FROM images WHERE filename = $1", [
+      `plot_${plotNumber}_plots`,
+    ]);
     await client.query("DELETE FROM open_plots WHERE plot_id = $1", [id]);
 
-    await client.query("COMMIT"); // Commit the transaction
-    res.json({ message: "Plot and associated images deleted successfully" });
+    await client.query("COMMIT");
+    res.json({ message: "Deleted successfully" });
   } catch (error) {
-    await client.query("ROLLBACK"); // Rollback on error
+    await client.query("ROLLBACK");
     next(error);
   } finally {
-    client.release(); // Always release the client
+    client.release();
   }
 };

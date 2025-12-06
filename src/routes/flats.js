@@ -1,31 +1,33 @@
-// src/routes/flats.js
 const express = require("express");
 const router = express.Router();
-const flatsController = require("../controllers/flatsController"); // MODIFIED: Import flatsController
-const authMiddleware = require("../middleware/authMiddleware");
+const flatsController = require("../controllers/flatsController");
+const { validationResult } = require("express-validator");
 
-// Public routes for fetching flat listings
-router.get("/", flatsController.getAllFlats); // MODIFIED
-router.get("/:id", flatsController.getFlatById); // MODIFIED
+// 🔴 OLD/WRONG IMPORT causing the crash:
+// const { isAuthenticated } = require('../middleware/authMiddleware');
 
-// Protected routes that require seller authentication
-router.post(
-  "/",
-  authMiddleware.isAuthenticated,
-  authMiddleware.isSeller,
-  flatsController.createFlat // MODIFIED
-);
-router.put(
-  "/:id",
-  authMiddleware.isAuthenticated,
-  authMiddleware.isSeller,
-  flatsController.updateFlat // MODIFIED
-);
-router.delete(
-  "/:id",
-  authMiddleware.isAuthenticated,
-  authMiddleware.isSeller,
-  flatsController.deleteFlat // MODIFIED
-);
+// ✅ NEW/CORRECT IMPORT:
+const { verifyToken, isSeller } = require("../middleware/authMiddleware");
+
+// Input validation middleware (optional, but good practice if you have it)
+// const validateFlat = [ ... ];
+
+/* --- ROUTES --- */
+
+// Create a Flat (Sellers only)
+// This was likely line 12 crashing because 'verifyToken' or 'isSeller' was undefined
+router.post("/", verifyToken, isSeller, flatsController.createFlat);
+
+// Get all Flats (Public)
+router.get("/", flatsController.getAllFlats);
+
+// Get Flat by ID (Public)
+router.get("/:id", flatsController.getFlatById);
+
+// Update Flat (Sellers only)
+router.put("/:id", verifyToken, isSeller, flatsController.updateFlat);
+
+// Delete Flat (Sellers only)
+router.delete("/:id", verifyToken, isSeller, flatsController.deleteFlat);
 
 module.exports = router;
