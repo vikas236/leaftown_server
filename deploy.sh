@@ -1,68 +1,50 @@
 #!/bin/bash
 
-# === CONFIGURATION ===
-VPS_ALIAS="kvm1"                       # <--- Uses your SSH config alias
-VPS_PATH="/home/vi/leaftown/server"    # Path on the remote server
-PM2_APP_NAME="leaftown-server"         # Name in PM2
+# -----------------------
+# 0. CONFIG
+# -----------------------
+REMOTE="kvm1"
+USER="vi"
+REMOTE_DIR="/home/vi/leaftown/server"
+SERVICE_NAME="leaftown_server"
 
-# === STEP 1: Ask for commit message ===
-echo "Enter commit message:"
-read COMMIT_MSG
-
-if [ -z "$COMMIT_MSG" ]; then
-    echo "❌ Commit message cannot be empty. Aborting."
-    exit 1
-fi
-
-# === STEP 2: Git Operations ===
-echo "📦 Processing Git..."
+# -----------------------
+# 1. Git push to GitHub
+# -----------------------
+echo "🔄 Staging files..."
 git add .
-git commit -m "$COMMIT_MSG"
-# git push origin main # Uncomment if you use GitHub/GitLab
 
-# === STEP 3: Deploy to VPS via rsync ===
-echo "🚀 Deploying code to $VPS_ALIAS:$VPS_PATH ..."
+echo "✍️ Enter commit message: "
+read msg
 
-# Ensure destination directory exists using the alias
-ssh $VPS_ALIAS "mkdir -p $VPS_PATH"
+git commit -m "$msg"
+git push origin main
+echo "✔️ Code pushed to GitHub"
 
-# === RSYNC ===
-# Uses the alias 'kvm1' directly.
-# --exclude 'uploads': Protects server-side images.
-# --exclude '.env': Protects server-side secrets.
+# -----------------------
+# 2. Upload to VPS
+# -----------------------
+echo "🚀 Uploading project to VPS..."
+rsync -avz --exclude="node_modules" --exclude=".git" ./ $REMOTE:$REMOTE_DIR
 
-rsync -avz --delete \
-  --exclude 'node_modules' \
-  --exclude '.git' \
-  --exclude '.env' \
-  --exclude 'uploads' \
-  ./ $VPS_ALIAS:$VPS_PATH/
+echo "✔️ Upload complete"
 
-# === STEP 4: Remote Commands ===
-echo "🔄 Running remote commands on $VPS_ALIAS..."
+# -----------------------
+# 3. Install dependencies & restart PM2
+# -----------------------
+echo "🔧 Installing dependencies & restarting server..."
 
-ssh $VPS_ALIAS << EOF
-  cd $VPS_PATH
+ssh $REMOTE << EOF
+  cd $REMOTE_DIR
   
-  # 1. Install dependencies
   echo "📦 Installing dependencies..."
-  npm install --production
+  pnpm install --prod
 
-  # 2. Restart/Start the server
-  echo "🔥 Managing PM2 process..."
-  
-  # Check if process exists
-  pm2 describe $PM2_APP_NAME > /dev/null
-  if [ \$? -eq 0 ]; then
-      # If it exists, restart it
-      pm2 restart $PM2_APP_NAME
-  else
-      # If it doesn't exist, start it on the new port (3003 will be read from .env)
-      pm2 start server.js --name "$PM2_APP_NAME"
-  fi
-  
-  # 3. Save config
-  pm2 save
+  echo "📌 Building TypeScript..."
+  pnpm build
 
-  echo "✅ Deployment of $PM2_APP_NAME Complete!"
+  echo "🔁 Restarting PM2..."
+  pm2 restart $SERVICE_NAME || pm2 start dist/index.js --name $SERVICE_NAME
+
+  echo "✔️ Deployment complete!"
 EOF
