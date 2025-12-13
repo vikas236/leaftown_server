@@ -6,7 +6,7 @@
 REMOTE="kvm1"
 USER="vi"
 REMOTE_DIR="/home/vi/leaftown/server"
-SERVICE_NAME="leaftown_server"
+SERVICE_NAME="leaftown-server"  # <--- CHANGED: Matches your Nginx config
 
 # -----------------------
 # 1. Git push to GitHub
@@ -26,7 +26,7 @@ echo "✔️ Code pushed to GitHub"
 # -----------------------
 echo "🚀 Uploading project to VPS..."
 
-# Create the directory first (since you deleted it)
+# Create the directory first (just in case)
 ssh $REMOTE "mkdir -p $REMOTE_DIR"
 
 # Upload files (Excluding local builds and git metadata)
@@ -51,7 +51,7 @@ ssh $REMOTE << EOF
   pnpm build
 
   # 3. Reset PM2
-  # We delete the old process to ensure it picks up the new 'dist' path correctly
+  # We delete the specific process to ensure it picks up the new 'dist' path correctly
   echo "🔁 Resetting PM2..."
   pm2 delete $SERVICE_NAME 2> /dev/null || true
   
