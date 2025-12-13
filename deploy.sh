@@ -25,26 +25,38 @@ echo "✔️ Code pushed to GitHub"
 # 2. Upload to VPS
 # -----------------------
 echo "🚀 Uploading project to VPS..."
-rsync -avz --exclude="node_modules" --exclude=".git" ./ $REMOTE:$REMOTE_DIR
+
+# Create the directory first (since you deleted it)
+ssh $REMOTE "mkdir -p $REMOTE_DIR"
+
+# Upload files (Excluding local builds and git metadata)
+rsync -avz --exclude="node_modules" --exclude=".git" --exclude="dist" ./ $REMOTE:$REMOTE_DIR
 
 echo "✔️ Upload complete"
 
 # -----------------------
-# 3. Install dependencies & restart PM2
+# 3. Install, Build & Start
 # -----------------------
-echo "🔧 Installing dependencies & restarting server..."
+echo "🔧 Installing dependencies & starting server..."
 
 ssh $REMOTE << EOF
   cd $REMOTE_DIR
-  
-  echo "📦 Installing dependencies..."
-  pnpm install --prod
 
+  # 1. Install ALL dependencies (we need devDeps to run the build)
+  echo "📦 Installing dependencies..."
+  pnpm install
+
+  # 2. Build the TypeScript code
   echo "📌 Building TypeScript..."
   pnpm build
 
-  echo "🔁 Restarting PM2..."
-  pm2 restart $SERVICE_NAME || pm2 start dist/index.js --name $SERVICE_NAME
+  # 3. Reset PM2
+  # We delete the old process to ensure it picks up the new 'dist' path correctly
+  echo "🔁 Resetting PM2..."
+  pm2 delete $SERVICE_NAME 2> /dev/null || true
+  
+  # Start the server pointing to the BUILT file
+  pm2 start dist/index.js --name $SERVICE_NAME
 
   echo "✔️ Deployment complete!"
 EOF
